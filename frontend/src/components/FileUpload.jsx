@@ -1,4 +1,4 @@
-import React, { useCallback, useState } from 'react'
+import  { useCallback, useState } from 'react'
 import { motion } from 'framer-motion'
 import { useDropzone } from 'react-dropzone'
 import { Upload, FileText, Image, Mic, X, CheckCircle } from 'lucide-react'
@@ -61,9 +61,9 @@ const FileUpload = ({ onFileUpload, uploadedFiles }) => {
   })
 
   const getFileIcon = (type) => {
-    if (type.includes('image')) return <Image className="w-8 h-8 text-blue-500" />
-    if (type.includes('audio')) return <Mic className="w-8 h-8 text-green-500" />
-    return <FileText className="w-8 h-8 text-red-500" />
+    if (type.includes('image')) return <Image className="w-6 h-6 md:w-8 md:h-8 text-blue-500 flex-shrink-0" />
+    if (type.includes('audio')) return <Mic className="w-6 h-6 md:w-8 md:h-8 text-green-500 flex-shrink-0" />
+    return <FileText className="w-6 h-6 md:w-8 md:h-8 text-red-500 flex-shrink-0" />
   }
 
   const formatFileSize = (bytes) => {
@@ -79,12 +79,12 @@ const FileUpload = ({ onFileUpload, uploadedFiles }) => {
       <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
-        className="text-center mb-8"
+        className="text-center mb-6 md:mb-8"
       >
-        <h2 className="text-3xl font-bold gradient-text mb-4">
+        <h2 className="text-2xl md:text-3xl font-bold gradient-text mb-3 md:mb-4 px-2">
           Upload Your Documents
         </h2>
-        <p className="text-gray-600 max-w-2xl mx-auto">
+        <p className="text-sm md:text-base text-gray-600 max-w-2xl mx-auto px-2">
           Upload PDFs, Word documents, images, and audio files. All processing happens locally on your device.
         </p>
       </motion.div>
@@ -92,7 +92,7 @@ const FileUpload = ({ onFileUpload, uploadedFiles }) => {
       {/* Upload Area */}
       <motion.div
         {...getRootProps()}
-        className={`border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all duration-300 ${
+        className={`border-2 border-dashed rounded-2xl p-6 md:p-12 text-center cursor-pointer transition-all duration-300 ${
           isDragActive 
             ? 'border-primary-500 bg-primary-50' 
             : 'border-gray-300 hover:border-primary-400 hover:bg-gray-50'
@@ -102,32 +102,32 @@ const FileUpload = ({ onFileUpload, uploadedFiles }) => {
       >
         <input {...getInputProps()} />
         
-        <div className="flex flex-col items-center space-y-4">
+        <div className="flex flex-col items-center space-y-3 md:space-y-4">
           {uploading ? (
-            <div className="w-16 h-16 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin"></div>
+            <div className="w-12 h-12 md:w-16 md:h-16 border-4 border-primary-200 border-t-primary-600 rounded-full animate-spin"></div>
           ) : (
-            <Upload className="w-16 h-16 text-gray-400" />
+            <Upload className="w-12 h-12 md:w-16 md:h-16 text-gray-400" />
           )}
           
           <div>
-            <h3 className="text-xl font-semibold text-gray-700 mb-2">
+            <h3 className="text-lg md:text-xl font-semibold text-gray-700 mb-2">
               {uploading ? 'Uploading...' : isDragActive ? 'Drop files here' : 'Drag & drop files here'}
             </h3>
-            <p className="text-gray-500 mb-4">
+            <p className="text-sm md:text-base text-gray-500 mb-3 md:mb-4">
               or click to browse
             </p>
             
-            <div className="flex flex-wrap justify-center gap-4 text-sm text-gray-600">
-              <div className="flex items-center space-x-2">
-                <FileText className="w-4 h-4" />
+            <div className="flex flex-wrap justify-center gap-2 md:gap-4 text-xs md:text-sm text-gray-600">
+              <div className="flex items-center space-x-1 md:space-x-2">
+                <FileText className="w-3 h-3 md:w-4 md:h-4" />
                 <span>PDF, DOCX</span>
               </div>
-              <div className="flex items-center space-x-2">
-                <Image className="w-4 h-4" />
+              <div className="flex items-center space-x-1 md:space-x-2">
+                <Image className="w-3 h-3 md:w-4 md:h-4" />
                 <span>Images</span>
               </div>
-              <div className="flex items-center space-x-2">
-                <Mic className="w-4 h-4" />
+              <div className="flex items-center space-x-1 md:space-x-2">
+                <Mic className="w-3 h-3 md:w-4 md:h-4" />
                 <span>Audio</span>
               </div>
             </div>
