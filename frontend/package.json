@@ -11,7 +11,6 @@
   },
   "dependencies": {
     "@headlessui/react": "^2.2.9",
-    "@tailwindcss/vite": "^4.1.14",
     "axios": "^1.12.2",
     "framer-motion": "^12.23.22",
     "lucide-react": "^0.544.0",
@@ -24,6 +23,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",
+    "@tailwindcss/vite": "^4.1.14",
     "@types/react": "^19.1.16",
     "@types/react-dom": "^19.1.9",
     "@vitejs/plugin-react": "^5.0.4",

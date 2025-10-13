@@ -1,6 +1,6 @@
 # Prism Backend API
 
-The FastAPI backend for the Prism multimodal RAG system with document Q&A capabilities using Mistral 7B.
+The FastAPI backend for the Prism multimodal RAG system with document Q&A capabilities using local GGUF models (Gemma, Mistral, etc.).
 
 ## Quick Start
 
@@ -14,11 +14,23 @@ pip install -r requirements.txt
 python setup_dev.py
 ```
 
-### 2. Download LLM Model
+### 2. Download an LLM Model (GGUF)
 
-Download `mistral-7b-instruct-v0.2.Q4_K_M.gguf` from [HuggingFace](https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF) and place it in:
+Place any `.gguf` model file under `models/llm/` (e.g., Gemma or Mistral). The loader will auto-discover and prefer Gemma files.
+
+Examples:
+- `models/llm/gemma-3n-E4B-it-Q3_K_S.gguf`
+- `models/llm/mistral-7b-instruct-v0.2.Q4_K_M.gguf`
+
+You can also set an explicit path via environment variable:
+
+Windows (PowerShell):
 ```
-models/llm/mistral-7b-instruct-v0.2.Q4_K_M.gguf
+$env:LLM_MODEL_PATH = "E:\\prism\\Prism\\backend\\models\\llm\\gemma-3n-E4B-it-Q3_K_S.gguf"
+```
+or
+```
+$env:PRISM_LLM_MODEL_PATH = "E:\\prism\\Prism\\backend\\models\\llm\\gemma-3n-E4B-it-Q3_K_S.gguf"
 ```
 
 ### 3. Run the Server
@@ -41,7 +53,7 @@ backend/
 ├── app/
 │   ├── main.py              # FastAPI application
 │   └── services/
-│       ├── llm_service.py   # Mistral 7B integration
+│       ├── llm_service.py   # Local GGUF LLM integration (Gemma/Mistral)
 │       └── qa_service.py    # Document Q&A logic
 ├── ingestion/
 │   ├── parse_pdf.py         # PDF/DOCX parsing
@@ -86,6 +98,12 @@ pip install -r requirements.txt
 # Force reinstall with no cache
 pip install llama-cpp-python --force-reinstall --no-cache-dir
 ```
+
+If you're on Python 3.12/3.13 or Windows and see load failures or crashes, consider upgrading:
+```bash
+pip install --upgrade "llama-cpp-python>=0.3.6"
+```
+Then re-run the backend.
 
 #### 3. Model Not Found Error
 - Download the model file to the correct path
