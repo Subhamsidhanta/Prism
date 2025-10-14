@@ -3,18 +3,49 @@ fastapi==0.104.1
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 aiofiles==23.2.1
+starlette==0.27.0
+httptools==0.7.1
+websockets==15.0.1
+
+# Environment variables
+python-dotenv==1.0.0
 
 # Document processing
 PyPDF2==3.0.1
 python-docx==1.1.0
 
 # LLM integration
-llama-cpp-python==0.2.11
+llama-cpp-python>=0.3.16
 
 # Text processing and chunking
 tiktoken==0.5.1
 langchain-text-splitters==0.0.1
+langchain-core==0.1.53
+langsmith==0.1.147
 
-# Utilities
-pydantic==2.7.4
-pydantic-core==2.18.4
+# Data validation and serialization
+pydantic==2.10.3
+pydantic-core==2.27.1
+
+# HTTP client and requests
+requests==2.32.3
+httpx==0.28.1
+
+# Async utilities
+anyio==3.7.1
+
+# JSON processing (faster than stdlib)
+orjson==3.11.3
+
+# Retry logic and utilities
+tenacity==8.5.0
+packaging==23.2
+
+# File monitoring for development
+watchfiles==1.1.1
+
+# Caching and performance
+diskcache==5.6.3
+
+# Additional utilities
+pathlib2==2.3.7; python_version < "3.4"

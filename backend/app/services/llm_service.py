@@ -11,6 +11,26 @@ from typing import List, Optional
 from llama_cpp import Llama
 import logging
 import threading
+from pathlib import Path
+
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    # Look for .env file in the services directory and parent directories
+    env_file = Path(__file__).parent / ".env"
+    if env_file.exists():
+        load_dotenv(env_file)
+        print(f"Loaded environment variables from: {env_file}")
+    else:
+        # Try parent directories
+        for parent in Path(__file__).parents:
+            env_file = parent / ".env"
+            if env_file.exists():
+                load_dotenv(env_file)
+                print(f"Loaded environment variables from: {env_file}")
+                break
+except ImportError:
+    print("python-dotenv not installed, environment variables may not be loaded from .env file")
 
 logger = logging.getLogger(__name__)
 
