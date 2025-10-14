@@ -1,5 +1,13 @@
-import { useState, useRef, useEffect } from 'react'
-import { motion, AnimatePresence } from 'framer-motion'
+// DocumentQA typing UX notes:
+// - We render a single assistant placeholder ("Thinking...") per question and update it in-place.
+// - Letter-by-letter typing is implemented with a recursive setTimeout (see handleSendMessage -> typeNext).
+//   • Adjust speed by changing `speedMs` (lower = faster, higher = slower).
+//   • To switch to word-by-word, replace `finalText.slice(0, i)` with logic that splits on spaces.
+// - Flicker mitigations:
+//   • Append user + placeholder in a single state update.
+//   • Disable entrance animation for user messages and while typing.
+//   • Only auto-scroll when message count increases; not on every character.
+import { useState, useRef, useEffect, memo } from 'react'
 import { MessageCircle, Send, FileText, Upload, Bot, User, Copy, ThumbsUp, ThumbsDown, Loader2 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { addToSearchHistory } from './SearchHistory'
@@ -12,18 +20,32 @@ const DocumentQA = () => {
   const [selectedDocument, setSelectedDocument] = useState('')
   const messagesEndRef = useRef(null)
   const fileInputRef = useRef(null)
+  const typingTimerRef = useRef(null)
+  const prevLenRef = useRef(0)
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
+  const scrollToBottom = (behavior = 'smooth') => {
+    messagesEndRef.current?.scrollIntoView({ behavior })
   }
 
+  // Anti-flicker: only scroll when a new message is appended
+  // (typing updates content on the last assistant message without changing the list length)
   useEffect(() => {
-    scrollToBottom()
-  }, [messages])
+    if (messages.length > prevLenRef.current) {
+      scrollToBottom('smooth')
+    }
+    prevLenRef.current = messages.length
+  }, [messages.length])
 
   useEffect(() => {
     // Load uploaded documents on component mount
     fetchDocuments()
+    // Cleanup typing timer on unmount
+    return () => {
+      if (typingTimerRef.current) {
+        clearTimeout(typingTimerRef.current)
+        typingTimerRef.current = null
+      }
+    }
   }, [])
 
   const fetchDocuments = async () => {
@@ -115,12 +137,26 @@ const DocumentQA = () => {
       timestamp: new Date().toLocaleTimeString()
     }
 
-    setMessages(prev => [...prev, userMessage])
     const currentInput = inputValue
     setInputValue('')
     setIsLoading(true)
 
     try {
+      // Create a single assistant placeholder message that we update in-place
+      // Append user + placeholder in ONE update to minimize scroll/animation flicker
+      const ts = Date.now()
+      const placeholderId = ts + 1
+      const placeholderMessage = {
+        id: placeholderId,
+        type: 'assistant',
+        content: 'Thinking...',
+        timestamp: new Date().toLocaleTimeString(),
+        sources: [],
+        success: undefined,
+        typing: true
+      }
+      setMessages(prev => [...prev, userMessage, placeholderMessage])
+
       const response = await fetch('http://localhost:8000/api/question', {
         method: 'POST',
         headers: {
@@ -128,49 +164,90 @@ const DocumentQA = () => {
         },
         body: JSON.stringify({
           question: currentInput,
-          file_id: selectedDocument ? parseInt(selectedDocument) : null
+          // Pass through file_id unchanged to match backend expectations
+          file_id: selectedDocument ? selectedDocument : null
         }),
       })
 
       const data = await response.json()
-      
-      const assistantMessage = {
-        id: Date.now() + 1,
-        type: 'assistant',
-        content: data.success ? data.answer : data.error || 'Sorry, I could not answer your question.',
-        timestamp: new Date().toLocaleTimeString(),
-        sources: data.sources || [],
-        context_used: data.context_used || false,
-        processing_time: data.processing_time || null
-      }
+      const finalText = data.success ? (data.answer || '') : (data.error || 'Sorry, I could not answer your question.')
 
-      // Add to search history if successful
+      // Add to search history once we know it's successful
       if (data.success) {
         const selectedDoc = uploadedDocuments.find(doc => doc.file_id === selectedDocument)
         addToSearchHistory(
           'document',
           currentInput,
-          data.answer,
+          finalText,
           data.sources || [],
           selectedDoc ? `Document: ${selectedDoc.file_name}` : 'General query'
         )
       }
 
-      setMessages(prev => [...prev, assistantMessage])
+      // Clear any existing typing timer (safety)
+      if (typingTimerRef.current) {
+        clearTimeout(typingTimerRef.current)
+        typingTimerRef.current = null
+      }
 
-      if (!data.success) {
-        toast.error(data.error || 'Failed to get answer')
+      // Typewriter effect (letter-by-letter): update only the content field of the last assistant message
+      // Use recursive setTimeout to avoid batching and ensure visible per-char updates
+      let i = 0
+  const speedMs = 35 // typing speed per character (slower to ensure visible per-letter updates)
+      const typeNext = () => {
+        i += 1
+        const partial = finalText.slice(0, i)
+        setMessages(prev => prev.map(m => (m.id === placeholderId ? { ...m, content: partial } : m)))
+        if (i < finalText.length) {
+          typingTimerRef.current = setTimeout(typeNext, speedMs)
+        } else {
+          if (typingTimerRef.current) {
+            clearTimeout(typingTimerRef.current)
+            typingTimerRef.current = null
+          }
+          // Mark typing complete and attach sources/flags
+          setMessages(prev => prev.map(m => {
+            if (m.id === placeholderId) {
+              return {
+                ...m,
+                typing: false,
+                success: !!data.success,
+                sources: data.sources || [],
+                context_used: data.context_used || false,
+                processing_time: data.processing_time || null
+              }
+            }
+            return m
+          }))
+          // Final scroll when typing is done
+          scrollToBottom('smooth')
+          if (!data.success) {
+            toast.error(data.error || 'Failed to get answer')
+          }
+        }
       }
+      typingTimerRef.current = setTimeout(typeNext, speedMs)
     } catch (error) {
-      const errorMessage = {
-        id: Date.now() + 1,
-        type: 'assistant',
-        content: 'Sorry, there was an error processing your question. Please check if the backend is running and try again.',
-        timestamp: new Date().toLocaleTimeString(),
-        sources: [],
-        context_used: false
-      }
-      setMessages(prev => [...prev, errorMessage])
+      // On error, update placeholder (if exists) or add a new assistant message
+      const fallbackText = 'Sorry, there was an error processing your question. Please check if the backend is running and try again.'
+      setMessages(prev => {
+        const last = prev[prev.length - 1]
+        if (last && last.type === 'assistant' && last.typing) {
+          return prev.map((m, idx, arr) => idx === arr.length - 1
+            ? { ...m, content: fallbackText, typing: false, success: false, sources: [] }
+            : m
+          )
+        }
+        return [...prev, {
+          id: Date.now() + 1,
+          type: 'assistant',
+          content: fallbackText,
+          timestamp: new Date().toLocaleTimeString(),
+          sources: [],
+          context_used: false,
+          success: false
+        }]
+      })
       toast.error('Connection error - check backend server')
       console.error('Send message error:', error)
     } finally {
@@ -190,10 +267,10 @@ const DocumentQA = () => {
     toast.success('Copied to clipboard!')
   }
 
-  const Message = ({ message }) => (
-    <motion.div
-      initial={{ opacity: 0, y: 20 }}
-      animate={{ opacity: 1, y: 0 }}
+  const Message = memo(({ message }) => {
+    // Render without animation to avoid flicker during frequent content updates
+    return (
+    <div
       className={`flex ${message.type === 'user' ? 'justify-end' : 'justify-start'} mb-3 sm:mb-4 px-1 sm:px-0`}
     >
       <div className={`max-w-xs sm:max-w-lg lg:max-w-3xl flex ${message.type === 'user' ? 'flex-row-reverse' : 'flex-row'} items-start space-x-2 sm:space-x-3 ${message.type === 'user' ? 'space-x-reverse' : ''}`}>
@@ -213,14 +290,15 @@ const DocumentQA = () => {
           )}
         </div>
         
-        <div className={`rounded-xl sm:rounded-2xl px-3 sm:px-4 py-2 sm:py-3 max-w-full ${
+        <div style={{ contain: 'paint' }} className={`rounded-xl sm:rounded-2xl px-3 sm:px-4 py-2 sm:py-3 max-w-full ${
           message.type === 'user'
             ? 'bg-primary-500 text-white'
             : message.type === 'system'
             ? 'bg-gray-100 text-gray-700 border-l-2 sm:border-l-4 border-gray-400'
-            : message.success 
-            ? 'bg-white border border-gray-200 text-gray-900'
-            : 'bg-red-50 border border-red-200 text-red-800'
+            : // Assistant bubble: keep neutral style while typing or when success is unknown
+            (message.success === false)
+            ? 'bg-red-50 border border-red-200 text-red-800'
+            : 'bg-white border border-gray-200 text-gray-900'
         }`}>
           <div className="whitespace-pre-wrap text-sm sm:text-base break-words">{message.content}</div>
           
@@ -262,8 +340,9 @@ const DocumentQA = () => {
           </div>
         </div>
       </div>
-    </motion.div>
-  )
+    </div>
+    )
+  })
 
   return (
     <div className="flex flex-col lg:flex-row h-[calc(100vh-8rem)] max-w-full">
@@ -363,25 +442,7 @@ const DocumentQA = () => {
               {messages.map((message) => (
                 <Message key={message.id} message={message} />
               ))}
-              {isLoading && (
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="flex justify-start mb-3 sm:mb-4 px-1 sm:px-0"
-                >
-                  <div className="max-w-xs sm:max-w-lg lg:max-w-3xl flex items-start space-x-2 sm:space-x-3">
-                    <div className="flex-shrink-0 w-6 h-6 sm:w-8 sm:h-8 rounded-full bg-purple-500 text-white flex items-center justify-center">
-                      <Bot className="w-3 h-3 sm:w-4 sm:h-4" />
-                    </div>
-                    <div className="bg-white border border-gray-200 rounded-xl sm:rounded-2xl px-3 sm:px-4 py-2 sm:py-3">
-                      <div className="flex items-center space-x-2">
-                        <Loader2 className="w-3 h-3 sm:w-4 sm:h-4 animate-spin text-purple-500" />
-                        <span className="text-gray-600 text-sm sm:text-base">Thinking...</span>
-                      </div>
-                    </div>
-                  </div>
-                </motion.div>
-              )}
+              {/* Loading bubble removed in favor of single assistant placeholder that is updated via typewriter */}
               <div ref={messagesEndRef} />
             </div>
           )}

@@ -1,5 +1,10 @@
 """
-LLM Service for handling Mistral 7B model with llama.cpp - Optimized for Speed
+LLM Service for loading a local GGUF model with llama.cpp (optimized for speed)
+
+Enhancements:
+- Supports explicit model path via environment variables: LLM_MODEL_PATH or PRISM_LLM_MODEL_PATH
+- Discovers any .gguf under common model folders and prefers Gemma, then Mistral
+- Keeps prior defaults for performance (n_ctx, n_threads) and templating
 """
 import os
 from typing import List, Optional
@@ -33,7 +38,9 @@ class MistralLLM:
         if hasattr(self, 'initialized'):
             return
             
-        self.model_path = model_path or self._find_model_path()
+        # Allow env var overrides first
+        env_model_path = os.getenv("LLM_MODEL_PATH") or os.getenv("PRISM_LLM_MODEL_PATH")
+        self.model_path = model_path or env_model_path or self._find_model_path()
         self.n_ctx = n_ctx
         self.n_threads = n_threads
         self.llm = None
@@ -42,61 +49,117 @@ class MistralLLM:
         if self.model_path and os.path.exists(self.model_path):
             self._load_model()
         else:
-            logger.warning(f"Model not found at {self.model_path}. Please download mistral-7b-instruct-v0.2.Q4_K_M.gguf")
+            logger.warning(
+                f"Model not found at {self.model_path}. Set LLM_MODEL_PATH or place a .gguf under models/llm/."
+            )
+
+    @property
+    def model_name(self) -> str:
+        """Best-effort model name from the file path"""
+        try:
+            if self.model_path:
+                return os.path.splitext(os.path.basename(self.model_path))[0]
+        except Exception:
+            pass
+        return "unknown-model"
     
     def _find_model_path(self) -> str:
-        """Find the model file in common locations"""
-        # Try different model files in order of preference
-        model_filenames = [
-            "mistral-7b-instruct-v0.2.Q2_K_M.gguf",
-            # "mistral-7b-instruct-v0.2.Q3_K_M.gguf",  # Working model first
-            # "mistral-7b-instruct-v0.2.Q4_K_M.gguf", 
-            # "mistral-7b-instruct-v0.2.Q40_K_M.gguf" # May be Qwen2 
-        ]
-        
-        # Get current working directory and script directory
+        """Find a GGUF model file in common locations, preferring Gemma then Mistral."""
         cwd = os.getcwd()
         script_dir = os.path.dirname(os.path.abspath(__file__))
-        
-        # Try each model filename
-        for model_filename in model_filenames:
-            possible_paths = [
-                # Relative to current working directory
-                os.path.join(cwd, "models", "llm", model_filename),
-                
-                # Relative to backend directory (parent of app)
-                os.path.join(os.path.dirname(os.path.dirname(script_dir)), "models", "llm", model_filename),
-                
-                # Relative to project root (2 levels up from app/services)
-                os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(script_dir))), "models", "llm", model_filename),
-                
-                # Legacy paths for compatibility
-                "../models/llm/" + model_filename,
-                "../../models/llm/" + model_filename,
-                "models/llm/" + model_filename,
-                model_filename,
-                
-                # User home directory
-                os.path.expanduser(f"~/models/{model_filename}"),
-                os.path.expanduser(f"~/.cache/prism/{model_filename}")
-            ]
-            
-            for path in possible_paths:
-                abs_path = os.path.abspath(path)
-                if os.path.exists(abs_path):
-                    logger.info(f"Found model at: {abs_path}")
-                    return abs_path
-        
-        # Return default path for first-time setup (use first preferred model)
-        default_model = model_filenames[0]
-        default_path = os.path.join(cwd, "models", "llm", default_model)
-        logger.warning(f"Model not found. Please download {default_model} to: {default_path}")
+
+        # Candidate directories to scan for any .gguf
+        candidate_dirs = [
+            os.path.join(cwd, "models", "llm"),
+            os.path.join(os.path.dirname(os.path.dirname(script_dir)), "models", "llm"),
+            os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(script_dir))), "models", "llm"),
+            os.path.abspath(os.path.join(script_dir, "..", "..", "models", "llm")),
+            os.path.abspath(os.path.join(script_dir, "..", "..", "..", "models", "llm")),
+        ]
+
+        # Unique-ify and keep only existing dirs
+        seen = set()
+        dirs = []
+        for d in candidate_dirs:
+            if d and d not in seen:
+                seen.add(d)
+                if os.path.isdir(d):
+                    dirs.append(d)
+
+        ggufs: List[str] = []
+        for d in dirs:
+            try:
+                for name in os.listdir(d):
+                    if name.lower().endswith(".gguf"):
+                        ggufs.append(os.path.abspath(os.path.join(d, name)))
+            except Exception:
+                continue
+
+        # Also check a couple of legacy/fallback spots
+        for p in [
+            os.path.abspath("models/llm"),
+            os.path.abspath("../models/llm"),
+            os.path.abspath("../../models/llm"),
+        ]:
+            if os.path.isdir(p):
+                try:
+                    for name in os.listdir(p):
+                        if name.lower().endswith(".gguf"):
+                            ggufs.append(os.path.abspath(os.path.join(p, name)))
+                except Exception:
+                    pass
+
+        # De-duplicate
+        ggufs = sorted(set(ggufs))
+
+        if ggufs:
+            def score(path: str) -> tuple:
+                fname = os.path.basename(path).lower()
+                # Prefer gemma, then mistral; prefer higher quant (Q* order roughly)
+                family_rank = 0
+                if "gemma" in fname:
+                    family_rank = 2
+                elif "mistral" in fname:
+                    family_rank = 1
+                else:
+                    family_rank = 0
+
+                # Prefer K_M over K_S lightly, and Q6 > Q5 > Q4 > Q3
+                quant_rank = 0
+                if "q6" in fname:
+                    quant_rank = 4
+                elif "q5" in fname:
+                    quant_rank = 3
+                elif "q4" in fname:
+                    quant_rank = 2
+                elif "q3" in fname:
+                    quant_rank = 1
+                kv_rank = 1 if "_k_m" in fname else 0
+                return (-family_rank, -quant_rank, -kv_rank, fname)
+
+            # Sort by our preference ascending by negatives
+            ggufs.sort(key=score)
+
+            # After sorting by score, pick the first
+            chosen = ggufs[0]
+            logger.info("Discovered GGUF models:")
+            for path in ggufs:
+                logger.info(f" - {path}")
+            logger.info(f"Selected model: {chosen}")
+            return chosen
+
+        # Final fallback: point to a typical path under CWD
+        default_path = os.path.join(cwd, "models", "llm", "model.gguf")
+        logger.warning(
+            "No GGUF models found. Place your model under models/llm/ or set LLM_MODEL_PATH. "
+            f"Expected default location: {default_path}"
+        )
         return default_path
     
     def _load_model(self):
-        """Load the Mistral model with performance optimizations"""
+        """Load the model with performance optimizations"""
         try:
-            logger.info(f"Loading Mistral model from {self.model_path}")
+            logger.info(f"Loading model from {self.model_path}")
             logger.info(f"Model file exists: {os.path.exists(self.model_path)}")
             logger.info(f"Model file size: {os.path.getsize(self.model_path) / (1024*1024*1024):.2f} GB")
             
@@ -112,7 +175,7 @@ class MistralLLM:
                 f16_kv=True,                # Use half precision for KV cache
                 logits_all=False,           # Don't compute logits for all tokens
             )
-            logger.info("✅ Mistral model loaded successfully with performance optimizations")
+            logger.info("✅ Model loaded successfully with performance optimizations")
         except Exception as e:
             logger.error(f"Failed to load model: {e}")
             logger.error(f"Exception type: {type(e).__name__}")
@@ -140,8 +203,8 @@ class MistralLLM:
             return "Error: Model not loaded. Please check if the model file exists."
         
         try:
-            # Format prompt for Mistral Instruct format
-            formatted_prompt = f"[INST] {prompt} [/INST]"
+            # Choose a simple template; prefer Gemma chat format if detected
+            formatted_prompt = self._format_prompt(prompt)
             
             # Optimized generation parameters for balanced speed and completeness
             response = self.llm(
@@ -161,6 +224,19 @@ class MistralLLM:
         except Exception as e:
             logger.error(f"Error generating response: {e}")
             return f"Error generating response: {str(e)}"
+
+    def _format_prompt(self, prompt: str) -> str:
+        """Return a model-friendly prompt format based on detected model name."""
+        name = (self.model_name or "").lower()
+        if "gemma" in name:
+            # Gemma chat template (simplified). Many Gemma instruct models in llama.cpp
+            # use <start_of_turn>/<end_of_turn> markers.
+            return (
+                f"<start_of_turn>user\n{prompt}<end_of_turn>\n"
+                f"<start_of_turn>model\n"
+            )
+        # Default to LLaMA/Mistral-style instruction format
+        return f"[INST] {prompt} [/INST]"
     
     def answer_question(self, context: str, question: str) -> str:
         """

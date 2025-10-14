@@ -60,7 +60,8 @@ async def root():
     return {
         "message": "Prism Document Q&A API",
         "version": "1.0.0",
-        "llm_ready": mistral_llm.is_ready()
+        "llm_ready": mistral_llm.is_ready(),
+        "model_name": getattr(mistral_llm, "model_name", "unknown")
     }
 
 @app.get("/api/processing-status/{file_id}")
@@ -175,7 +176,7 @@ async def chat(request: ChatRequest):
             success=True,
             response=response_text,
             model_info={
-                "model_name": "Mistral 7B Instruct",
+                "model_name": getattr(mistral_llm, "model_name", "unknown"),
                 "tokens_used": len(response_text.split()),  # Approximate token count
                 "context_length": mistral_llm.n_ctx
             }
@@ -265,7 +266,8 @@ async def model_status():
     return {
         "model_loaded": mistral_llm.is_ready(),
         "model_path": mistral_llm.model_path,
-        "context_size": mistral_llm.n_ctx
+        "context_size": mistral_llm.n_ctx,
+        "model_name": getattr(mistral_llm, "model_name", "unknown")
     }
 
 @app.delete("/api/documents/{file_id}")
